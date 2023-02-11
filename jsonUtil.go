@@ -77,6 +77,7 @@ func (e *jsonEncoder) store(address uintptr, data *[]byte) {
 				e.cacheNums = 0
 				e.cacheSuccessNums = 0
 			}
+			e.cacheInValidTimes = 0
 		}
 	}
 	atomic.AddInt64(&e.capacity, int64(len(*data)))
