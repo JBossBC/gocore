@@ -1,0 +1,120 @@
+func ConvertValueToByte(value reflect.Value) (result []byte, err error) {
+	defer func() {
+		if panicErr := recover(); panicErr != any(nil) {
+			result = nil
+			fmt.Println(panicErr)
+			err = fmt.Errorf("params analy error")
+		}
+	}()
+	result = make([]byte, 0, 64)
+	switch value.Kind() {
+	case reflect.String:
+		result = append(result, []byte(value.String())...)
+	case reflect.Int, reflect.Int64, reflect.Int8, reflect.Int16, reflect.Int32:
+		result = append(result, []byte(strconv.FormatInt(value.Int(), 10))...)
+	case reflect.Slice:
+		var tempArr = make([]byte, 0, value.Len()*value.Type().Elem().Align())
+		for i := 0; i < value.Len(); i++ {
+			temp, err := convertValueToByte(value.Index(i))
+			if err != nil {
+				return nil, err
+			}
+			if i != value.Len()-1 {
+				temp = append(temp, ',')
+			}
+			tempArr = append(tempArr, temp...)
+		}
+		result = append(result, combineToJson(value.Type().Name(), string(tempArr), value.Kind())...)
+	case reflect.Struct:
+		var number = value.NumField()
+		var temp = make([]byte, 0, value.Type().Size())
+		for i := 0; i < number; i++ {
+			var fieldValue = value.Field(i)
+			fieldName := value.Type().Field(i).Name
+			bytes, err := convertValueToByte(fieldValue)
+			if err != nil {
+				return nil, err
+			}
+			fieldType := fieldValue.Kind()
+			if fieldType == reflect.Struct {
+				temp = append(temp, bytes...)
+				if i != number-1 {
+					temp = append(temp, ',')
+				}
+				continue
+			}
+			if fieldType == reflect.Map {
+				fieldType = reflect.Int
+			}
+			temp = append(temp, combineToJson(fieldName, string(bytes), fieldType)...)
+			if i != number-1 {
+				temp = append(temp, ',')
+			}
+		}
+		result = append(result, combineToJson(value.Type().Name(), string(temp), value.Kind())...)
+	case reflect.Bool:
+		result = append(result, strconv.FormatBool(value.Bool())...)
+	case reflect.Pointer, reflect.Interface, reflect.Uintptr:
+		elem := value.Elem()
+		temp, err := convertValueToByte(elem)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, temp...)
+	case reflect.Float32, reflect.Float64:
+		result = append(result, strconv.FormatFloat(value.Float(), 'E', -1, 32)...)
+	case reflect.Complex64, reflect.Complex128:
+		result = append(result, strconv.FormatComplex(value.Complex(), 'E', -1, 32)...)
+	//maybe can improve
+	case reflect.Map:
+		keys := value.MapKeys()
+		if len(keys) <= 0 {
+			return
+		}
+		var tempArr = make([]byte, 0, 2*len(keys)*(keys[0].Type().Align())*value.MapIndex(keys[0]).Type().Align())
+		for i := 0; i < len(keys); i++ {
+			var keyValue = value.MapIndex(keys[i])
+			keyBytes, err := convertValueToByte(keys[i])
+			if err != nil {
+				return nil, err
+			}
+			valueBytes, err := convertValueToByte(keyValue)
+			if err != nil {
+				return nil, err
+			}
+			tempArr = append(tempArr, combineToJson(string(keyBytes), string(valueBytes), reflect.String)...)
+		}
+		result = append(result, combineToJson("", string(tempArr), reflect.Map)...)
+	}
+	return result, nil
+}
+
+func combineToJson(key string, value string, valueType reflect.Kind) []byte {
+	sb := strings.Builder{}
+	sb.WriteString("\"")
+	sb.WriteString(key)
+	sb.WriteString("\": ")
+	switch valueType {
+	case reflect.String:
+		sb.WriteString("\"")
+		sb.WriteString(value)
+		sb.WriteString("\"")
+	case reflect.Int, reflect.Int64, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128, reflect.Bool:
+		sb.WriteString(value)
+	case reflect.Slice, reflect.Array:
+		sb.WriteString("[")
+		sb.WriteString(value)
+		sb.WriteString("]")
+	case reflect.Struct:
+		sb.WriteString("{")
+		sb.WriteString(value)
+		sb.WriteString("}")
+	case reflect.Map:
+		sb = strings.Builder{}
+		sb.WriteString("{")
+		sb.WriteString(value)
+		sb.WriteString("}")
+	}
+	sb.WriteString("\n")
+	return []byte(sb.String())
+}
