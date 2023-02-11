@@ -1,4 +1,4 @@
-func ConvertValueToByte(value reflect.Value) (result []byte, err error) {
+func ConvertBytes(value reflect.Value) (result []byte, err error) {
 	defer func() {
 		if panicErr := recover(); panicErr != any(nil) {
 			result = nil
