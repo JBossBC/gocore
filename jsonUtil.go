@@ -12,6 +12,7 @@ import (
 
 const MaxStorageBytes int64 = 1024
 const MaxTolerateCacheFailedRate = 0.4
+const RetryStoreCacheTimes = 10
 
 type nocopy uintptr
 type jsonEncoder struct {
@@ -55,10 +56,10 @@ func (e *jsonEncoder) store(address uintptr, data *[]byte) {
 	var cacheSuccessNums = e.cacheSuccessNums
 	var cacheNums = e.cacheNums
 	if e.capacity+int64(len(*data)) > MaxStorageBytes {
-		if int64(e.obsolete.peekMax())+MaxStorageBytes-e.capacity < int64(len(*data)) && e.cacheInValidTimes < 10 {
+		if int64(e.obsolete.peekMax())+MaxStorageBytes-e.capacity < int64(len(*data)) && e.cacheInValidTimes < RetryStoreCacheTimes {
 			e.cacheInValidTimes++
 			return
-		} else if e.cacheInValidTimes >= 10 {
+		} else if e.cacheInValidTimes >= RetryStoreCacheTimes {
 			value := e.obsolete.peekMax()
 			if int64(len(*e.cache[value])) > MaxStorageBytes/4 {
 				delete(e.cache, value)

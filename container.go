@@ -34,7 +34,7 @@ func (h *heap) peekMin() uintptr {
 }
 func (h *heap) insert(key int, value uintptr) {
 	h.length++
-	if h.length > cap(h.heapArr) {
+	if h.length >= len(h.heapArr) {
 		h.heapArr = append(h.heapArr, make([]int, 100)...)
 		h.value = append(h.value, make([]uintptr, 100)...)
 	}
