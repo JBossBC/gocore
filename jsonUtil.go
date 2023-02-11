@@ -30,11 +30,11 @@ type jsonEncoder struct {
 func init() {
 	JsonEncoder = &jsonEncoder{
 		cache:    make(map[uintptr]*[]byte),
-		capacity: MaxStorageBytes,
+		capacity: 0,
 		obsolete: heap{
 			heapArr: make([]int, 100),
 			value:   make([]uintptr, 100),
-			length:  1,
+			length:  0,
 		},
 		rw:               sync.RWMutex{},
 		cacheAccessTimes: make(map[uintptr]int64),
@@ -118,7 +118,12 @@ func Marshal(value any) ([]byte, error) {
 	if ok {
 		return *load, nil
 	}
+	sb := strings.Builder{}
 	bytes, err := marshal(reflect.ValueOf(value))
+	sb.WriteString("{")
+	sb.WriteString(string(bytes))
+	sb.WriteString("}")
+	bytes = []byte(sb.String())
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +238,7 @@ func combineToJson(key string, value string, valueType reflect.Kind) []byte {
 		sb.WriteString("[")
 		sb.WriteString(value)
 		sb.WriteString("]")
-	case reflect.Struct:
+	case reflect.Struct, reflect.Interface:
 		sb.WriteString("{")
 		sb.WriteString(value)
 		sb.WriteString("}")

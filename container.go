@@ -33,6 +33,7 @@ func (h *heap) peekMin() uintptr {
 	return h.value[h.length-1]
 }
 func (h *heap) insert(key int, value uintptr) {
+	h.length++
 	if h.length > cap(h.heapArr) {
 		h.heapArr = append(h.heapArr, make([]int, 100)...)
 		h.value = append(h.value, make([]uintptr, 100)...)
@@ -41,19 +42,17 @@ func (h *heap) insert(key int, value uintptr) {
 	h.value[h.length] = value
 	h.down(h.length)
 	h.up(h.length)
-	h.length++
 }
 func (h *heap) delete(index int) {
-	if index == h.length-1 {
-		h.length--
-		return
-	}
 	h.swap(index, h.length)
 	h.length--
 	h.down(index)
 	h.up(index)
 }
 func (h *heap) peekMax() uintptr {
+	if h.length <= 0 {
+		return uintptr(0)
+	}
 	return h.value[1]
 }
 func (h *heap) swap(heapPre int, heapLast int) {

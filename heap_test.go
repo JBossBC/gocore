@@ -10,7 +10,7 @@ func TestHeap(t *testing.T) {
 	h := &heap{
 		heapArr: make([]int, 100),
 		value:   make([]uintptr, 100),
-		length:  1,
+		length:  0,
 	}
 	h.insert(100, uintptr(1))
 	h.insert(101, uintptr(2))
