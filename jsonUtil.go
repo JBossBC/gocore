@@ -52,6 +52,8 @@ func (e *jsonEncoder) store(address uintptr, data *[]byte) {
 	if _, ok := e.cache[address]; ok {
 		return
 	}
+	var cacheSuccessNums = e.cacheSuccessNums
+	var cacheNums = e.cacheNums
 	if e.capacity+int64(len(*data)) > MaxStorageBytes {
 		if int64(e.obsolete.peekMax())+MaxStorageBytes-e.capacity < int64(len(*data)) && e.cacheInValidTimes < 10 {
 			e.cacheInValidTimes++
@@ -62,22 +64,29 @@ func (e *jsonEncoder) store(address uintptr, data *[]byte) {
 				delete(e.cache, value)
 				e.obsolete.delete(e.obsolete.length)
 				delete(e.cacheAccessTimes, value)
-			} else if float64(e.cacheSuccessNums/e.cacheNums) < MaxTolerateCacheFailedRate {
+			} else if float64(cacheSuccessNums/cacheNums) < MaxTolerateCacheFailedRate {
 				var sum = int64(e.obsolete.length)
 				for i := 0; i > e.obsolete.length; i++ {
 					var temp = e.obsolete.value[e.obsolete.length]
 					//can't give up the hot data
-					if e.cacheAccessTimes[temp] > e.cacheSuccessNums/sum*2 {
+					if e.cacheAccessTimes[temp] > cacheSuccessNums/sum*2 {
 						continue
 					}
-					delete(e.cache, address)
-					delete(e.cacheAccessTimes, address)
+					delete(e.cache, temp)
+					delete(e.cacheAccessTimes, temp)
 					e.obsolete.delete(i)
 				}
 				e.cacheNums = 0
 				e.cacheSuccessNums = 0
 			}
 			e.cacheInValidTimes = 0
+		} else if int64(e.obsolete.peekMax())+MaxStorageBytes-e.capacity >= int64(len(*data)) {
+			if e.cacheAccessTimes[e.obsolete.peekMax()] <= cacheSuccessNums/int64(len(e.cache))*2 {
+				var temp = e.obsolete.peekMax()
+				delete(e.cache, temp)
+				delete(e.cacheAccessTimes, temp)
+				e.obsolete.delete(1)
+			}
 		}
 	}
 	atomic.AddInt64(&e.capacity, int64(len(*data)))

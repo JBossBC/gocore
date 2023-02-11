@@ -35,9 +35,12 @@ func BenchmarkGolangUtilMarshal(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_, err := Marshal(&testStruct{name: "xiyang", value: "xiyangValue", mapping: rand.Int(), err: fmt.Errorf("hello error")})
 		if err != nil {
+			fmt.Println(err.Error())
 			return
 		}
 	}
+	fmt.Println(JsonEncoder.cacheSuccessNums)
+	fmt.Println(len(JsonEncoder.cache))
 }
 func BenchmarkJSONMarshal(b *testing.B) {
 	for i := 0; i < b.N; i++ {
