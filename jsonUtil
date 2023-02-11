@@ -6,7 +6,7 @@ func ConvertValueToByte(value reflect.Value) (result []byte, err error) {
 			err = fmt.Errorf("params analy error")
 		}
 	}()
-	result = make([]byte, 0, 64)
+	result = make([]byte, 0, value.Type().Size()*2)
 	switch value.Kind() {
 	case reflect.String:
 		result = append(result, []byte(value.String())...)
