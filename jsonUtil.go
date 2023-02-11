@@ -11,8 +11,9 @@ import (
 )
 
 const MaxStorageBytes int64 = 1024
-const MaxTolerateCacheFailedRate = 0.4
+const MaxTolerateCacheFailedRate = 0.3
 const RetryStoreCacheTimes = 10
+const ArrangeCacheTimes = 1000
 
 type nocopy uintptr
 type jsonEncoder struct {
@@ -55,6 +56,7 @@ func (e *jsonEncoder) store(address uintptr, data *[]byte) {
 	}
 	var cacheSuccessNums = e.cacheSuccessNums
 	var cacheNums = e.cacheNums
+	//cache drain strategy
 	if e.capacity+int64(len(*data)) > MaxStorageBytes {
 		if int64(e.obsolete.peekMax())+MaxStorageBytes-e.capacity < int64(len(*data)) && e.cacheInValidTimes < RetryStoreCacheTimes {
 			e.cacheInValidTimes++
@@ -90,11 +92,30 @@ func (e *jsonEncoder) store(address uintptr, data *[]byte) {
 			}
 		}
 	}
+	if e.cacheNums > ArrangeCacheTimes {
+		if float64(cacheSuccessNums/cacheNums) < MaxTolerateCacheFailedRate {
+			var sum = int64(e.obsolete.length)
+			for i := 0; i > e.obsolete.length; i++ {
+				var temp = e.obsolete.value[e.obsolete.length]
+				//can't give up the hot data
+				if e.cacheAccessTimes[temp] > cacheSuccessNums/sum {
+					continue
+				}
+				delete(e.cache, temp)
+				delete(e.cacheAccessTimes, temp)
+				e.obsolete.delete(i)
+			}
+			e.cacheNums = 0
+			e.cacheSuccessNums = 0
+			e.cacheInValidTimes = 0
+		}
+	}
 	atomic.AddInt64(&e.capacity, int64(len(*data)))
 	e.obsolete.insert(len(*data), address)
 	e.cacheAccessTimes[address] = 0
 	e.cache[address] = data
 }
+
 func (e *jsonEncoder) load(address uintptr) (*[]byte, bool) {
 	e.check()
 	e.rw.RLock()
@@ -131,13 +152,13 @@ func Marshal(value any) ([]byte, error) {
 	}
 	sb := strings.Builder{}
 	bytes, err := marshal(reflect.ValueOf(value))
+	if err != nil {
+		return nil, err
+	}
 	sb.WriteString("{")
 	sb.WriteString(string(bytes))
 	sb.WriteString("}")
 	bytes = []byte(sb.String())
-	if err != nil {
-		return nil, err
-	}
 	JsonEncoder.store(address, &bytes)
 	return bytes, nil
 }
