@@ -1,4 +1,132 @@
-func Marshal(value reflect.Value) (result []byte, err error) {
+package golangUtil
+
+import (
+	"fmt"
+	"reflect"
+	"strconv"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"unsafe"
+)
+
+const MaxStorageBytes int64 = 1024
+const MaxTolerateCacheFailedRate = 0.4
+
+type nocopy uintptr
+type jsonEncoder struct {
+	cache             map[uintptr]*[]byte
+	obsolete          heap
+	cacheAccessTimes  map[uintptr]int64
+	capacity          int64
+	nocopy            nocopy
+	rw                sync.RWMutex
+	cacheInValidTimes int
+	//the field to order the cache invalid info
+	cacheSuccessNums int64
+	cacheNums        int64
+}
+
+func init() {
+	JsonEncoder = &jsonEncoder{
+		cache:    make(map[uintptr]*[]byte),
+		capacity: MaxStorageBytes,
+		obsolete: heap{
+			heapArr: make([]int, 100),
+			value:   make([]uintptr, 100),
+			length:  1,
+		},
+		rw:               sync.RWMutex{},
+		cacheAccessTimes: make(map[uintptr]int64),
+	}
+}
+
+var (
+	JsonEncoder *jsonEncoder
+)
+
+func (e *jsonEncoder) store(address uintptr, data *[]byte) {
+	e.check()
+	e.rw.Lock()
+	defer e.rw.Unlock()
+	if _, ok := e.cache[address]; ok {
+		return
+	}
+	if e.capacity+int64(len(*data)) > MaxStorageBytes {
+		if int64(e.obsolete.peekMax())+MaxStorageBytes-e.capacity < int64(len(*data)) && e.cacheInValidTimes < 10 {
+			e.cacheInValidTimes++
+			return
+		} else if e.cacheInValidTimes >= 10 {
+			value := e.obsolete.peekMax()
+			if int64(len(*e.cache[value])) > MaxStorageBytes/4 {
+				delete(e.cache, value)
+				e.obsolete.delete(e.obsolete.length)
+				delete(e.cacheAccessTimes, value)
+			} else if float64(e.cacheSuccessNums/e.cacheNums) < MaxTolerateCacheFailedRate {
+				var sum = int64(e.obsolete.length)
+				for i := 0; i > e.obsolete.length; i++ {
+					var temp = e.obsolete.value[e.obsolete.length]
+					//can't give up the hot data
+					if e.cacheAccessTimes[temp] > e.cacheSuccessNums/sum*2 {
+						continue
+					}
+					delete(e.cache, address)
+					delete(e.cacheAccessTimes, address)
+					e.obsolete.delete(i)
+				}
+				e.cacheNums = 0
+				e.cacheSuccessNums = 0
+			}
+		}
+	}
+	atomic.AddInt64(&e.capacity, int64(len(*data)))
+	e.obsolete.insert(len(*data), address)
+	e.cacheAccessTimes[address] = 0
+	e.cache[address] = data
+}
+func (e *jsonEncoder) load(address uintptr) (*[]byte, bool) {
+	e.check()
+	e.rw.RLock()
+	defer e.rw.RUnlock()
+	atomic.AddInt64(&e.cacheNums, 1)
+	value, ok := e.cache[address]
+	if ok {
+		times := e.cacheAccessTimes[address]
+		atomic.AddInt64(&times, 1)
+		atomic.AddInt64(&e.cacheSuccessNums, 1)
+	}
+	return value, ok
+}
+func (e *jsonEncoder) check() {
+	if uintptr(e.nocopy) != uintptr(unsafe.Pointer(e)) &&
+		!atomic.CompareAndSwapUintptr((*uintptr)(&e.nocopy), 0, uintptr(unsafe.Pointer(e))) &&
+		uintptr(e.nocopy) != uintptr(unsafe.Pointer(e)) {
+		panic(any("object has copyed"))
+	}
+}
+
+func Marshal(value any) ([]byte, error) {
+	var address uintptr
+	var load *[]byte
+	var ok bool
+	if value, ok := value.(unsafe.Pointer); ok {
+		address = uintptr(value)
+	} else {
+		address = uintptr(unsafe.Pointer(&value))
+	}
+	load, ok = JsonEncoder.load(address)
+	if ok {
+		return *load, nil
+	}
+	bytes, err := marshal(reflect.ValueOf(value))
+	if err != nil {
+		return nil, err
+	}
+	JsonEncoder.store(address, &bytes)
+	return bytes, nil
+}
+
+func marshal(value reflect.Value) (result []byte, err error) {
 	defer func() {
 		if panicErr := recover(); panicErr != any(nil) {
 			result = nil
@@ -15,7 +143,7 @@ func Marshal(value reflect.Value) (result []byte, err error) {
 	case reflect.Slice:
 		var tempArr = make([]byte, 0, value.Len()*value.Type().Elem().Align())
 		for i := 0; i < value.Len(); i++ {
-			temp, err := convertValueToByte(value.Index(i))
+			temp, err := marshal(value.Index(i))
 			if err != nil {
 				return nil, err
 			}
@@ -31,7 +159,7 @@ func Marshal(value reflect.Value) (result []byte, err error) {
 		for i := 0; i < number; i++ {
 			var fieldValue = value.Field(i)
 			fieldName := value.Type().Field(i).Name
-			bytes, err := convertValueToByte(fieldValue)
+			bytes, err := marshal(fieldValue)
 			if err != nil {
 				return nil, err
 			}
@@ -56,7 +184,7 @@ func Marshal(value reflect.Value) (result []byte, err error) {
 		result = append(result, strconv.FormatBool(value.Bool())...)
 	case reflect.Pointer, reflect.Interface, reflect.Uintptr:
 		elem := value.Elem()
-		temp, err := convertValueToByte(elem)
+		temp, err := marshal(elem)
 		if err != nil {
 			return nil, err
 		}
@@ -74,11 +202,11 @@ func Marshal(value reflect.Value) (result []byte, err error) {
 		var tempArr = make([]byte, 0, 2*len(keys)*(keys[0].Type().Align())*value.MapIndex(keys[0]).Type().Align())
 		for i := 0; i < len(keys); i++ {
 			var keyValue = value.MapIndex(keys[i])
-			keyBytes, err := convertValueToByte(keys[i])
+			keyBytes, err := marshal(keys[i])
 			if err != nil {
 				return nil, err
 			}
-			valueBytes, err := convertValueToByte(keyValue)
+			valueBytes, err := marshal(keyValue)
 			if err != nil {
 				return nil, err
 			}
