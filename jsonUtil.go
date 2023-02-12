@@ -41,6 +41,7 @@ func init() {
 		rw:               sync.RWMutex{},
 		cacheAccessTimes: make(map[uintptr]int64),
 	}
+	JsonEncoder.nocopy = nocopy(unsafe.Pointer(JsonEncoder))
 }
 
 var (
@@ -162,7 +163,18 @@ func Marshal(value any) ([]byte, error) {
 	JsonEncoder.store(address, &bytes)
 	return bytes, nil
 }
-
+func isInvalid(value reflect.Value) bool {
+	if value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return true
+		}
+	} else {
+		if value.IsZero() {
+			return true
+		}
+	}
+	return false
+}
 func marshal(value reflect.Value) (result []byte, err error) {
 	defer func() {
 		if panicErr := recover(); panicErr != any(nil) {
@@ -171,6 +183,9 @@ func marshal(value reflect.Value) (result []byte, err error) {
 			err = fmt.Errorf("params analy error")
 		}
 	}()
+	if isInvalid(value) {
+		return nil, nil
+	}
 	result = make([]byte, 0, value.Type().Size()*2)
 	switch value.Kind() {
 	case reflect.String:
@@ -195,6 +210,9 @@ func marshal(value reflect.Value) (result []byte, err error) {
 		var temp = make([]byte, 0, value.Type().Size())
 		for i := 0; i < number; i++ {
 			var fieldValue = value.Field(i)
+			if isInvalid(fieldValue) {
+				continue
+			}
 			fieldName := value.Type().Field(i).Name
 			bytes, err := marshal(fieldValue)
 			if err != nil {
