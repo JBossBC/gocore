@@ -111,6 +111,8 @@ func (s *slideWindowsLimiter) TryAcquire() bool {
 	} else {
 		if atomic.CompareAndSwapInt32(&s.clearFlag, 0, 1) {
 			go func() {
+				s.lock.Lock()
+				defer s.lock.Unlock()
 				s.timestamp += diff
 				var i int64 = 0
 				var invalidWindows = index % s.subWindowsSize

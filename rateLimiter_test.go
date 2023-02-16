@@ -1,6 +1,7 @@
 package golangUtil
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,9 +12,21 @@ func TestSlideWindows(t *testing.T) {
 	println(TryAcquire())
 }
 func BenchmarkTryAcquire(b *testing.B) {
+	group := sync.WaitGroup{}
+	group.Add(b.N)
+	rate := GetRateLimiterMiddleware(WithWindowsSize(200000000 * time.Nanosecond))
+	var totalResult int64
 	for i := 0; i < b.N; i++ {
-		TryAcquire()
+		go func() {
+			defer group.Done()
+			result := rate.TryAcquire()
+			if result {
+				atomic.AddInt64(&totalResult, 1)
+			}
+		}()
 	}
+	group.Wait()
+	fmt.Println(totalResult)
 }
 
 func TestConcurrencyTryAcquire(t *testing.T) {
