@@ -21,7 +21,7 @@ func TestConcurrencyTryAcquire(t *testing.T) {
 	group := sync.WaitGroup{}
 	group.Add(times)
 
-	var smoothTimes time.Duration = 3 * time.Millisecond
+	var smoothTimes time.Duration = 30 * time.Millisecond
 	var resultInt int64
 	var cycle int64 = 0
 	for i := 0; i < times; i++ {
