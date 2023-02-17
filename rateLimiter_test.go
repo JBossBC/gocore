@@ -14,8 +14,22 @@ func TestSlideWindows(t *testing.T) {
 func BenchmarkTryAcquire(b *testing.B) {
 	group := sync.WaitGroup{}
 	group.Add(b.N)
-	rate := GetRateLimiterMiddleware(WithWindowsSize(200000000 * time.Nanosecond))
+	timeGap := 1000000000 * time.Nanosecond
+	rate := getRateLimiterMiddleware(WithWindowsSize(timeGap), WithSubWindowsNumber(100000), WithMaxPassingPerWindows(1024))
 	var totalResult int64
+	go func() {
+		tick := time.After(timeGap)
+		for {
+			select {
+			case <-tick:
+				if totalResult > rate.permitsPerWindows {
+					fmt.Println(totalResult)
+				}
+				atomic.SwapInt64(&totalResult, 0)
+				tick = time.After(timeGap)
+			}
+		}
+	}()
 	for i := 0; i < b.N; i++ {
 		go func() {
 			defer group.Done()
@@ -26,14 +40,12 @@ func BenchmarkTryAcquire(b *testing.B) {
 		}()
 	}
 	group.Wait()
-	fmt.Println(totalResult)
 }
 
 func TestConcurrencyTryAcquire(t *testing.T) {
 	const times = 10000
 	group := sync.WaitGroup{}
 	group.Add(times)
-
 	var smoothTimes time.Duration = 30 * time.Millisecond
 	var resultInt int64
 	var cycle int64 = 0

@@ -1,15 +1,17 @@
 package golangUtil
 
 import (
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
-const SmallWindows int64 = 1 << 5
+const SmallWindows int64 = 1 << 10
 const TimeShift = 1e9
 const WindowsSize int64 = 3 * TimeShift
 const MaxRequestPerWindows = WindowsSize / TimeShift * 1000
+const RateLimitingError = "server is busy,please wait"
 
 type slideWindowsLimiter struct {
 	permitsPerWindows    int64
@@ -26,6 +28,7 @@ type slideWindowsLimiter struct {
 	options              rateLimiterOptions
 }
 type rateLimiterOptions func(limiter *slideWindowsLimiter)
+type MiddleWare func(http.Handler) http.Handler
 
 func WithMaxPassingPerWindows(numbers int64) rateLimiterOptions {
 	return func(limiter *slideWindowsLimiter) {
@@ -53,7 +56,7 @@ func init() {
 	deferCreateWindows(slideLimiter)
 }
 
-func GetRateLimiterMiddleware(options ...rateLimiterOptions) (result *slideWindowsLimiter) {
+func getRateLimiterMiddleware(options ...rateLimiterOptions) (result *slideWindowsLimiter) {
 	result = initDefaultLimiter()
 	for i := 0; i < len(options); i++ {
 		options[i](result)
@@ -83,6 +86,21 @@ func initDefaultLimiter() (result *slideWindowsLimiter) {
 	}
 	result.cond = sync.NewCond(&result.lock)
 	return result
+}
+
+func RegistryRateLimiting(options ...rateLimiterOptions) MiddleWare {
+	middleware := getRateLimiterMiddleware(options...)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			if middleware.TryAcquire() {
+				next.ServeHTTP(writer, request)
+			} else {
+				writer.WriteHeader(500)
+				writer.Write([]byte(RateLimitingError))
+			}
+		},
+		)
+	}
 }
 
 var slideLimiter *slideWindowsLimiter
