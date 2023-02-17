@@ -10,7 +10,7 @@ import (
 const SmallWindows int64 = 1 << 10
 const TimeShift = 1e9
 const WindowsSize int64 = 3 * TimeShift
-const MaxRequestPerWindows = WindowsSize / TimeShift * 1000
+const MaxRequestPerWindows = WindowsSize / TimeShift * 1 << 12
 const RateLimitingError = "server is busy,please wait"
 
 type slideWindowsLimiter struct {
