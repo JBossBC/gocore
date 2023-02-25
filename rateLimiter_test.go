@@ -14,11 +14,11 @@ func TestSlideWindows(t *testing.T) {
 func BenchmarkTryAcquire(b *testing.B) {
 	group := sync.WaitGroup{}
 	group.Add(b.N)
-	timeGap := 1000000000 * time.Nanosecond
-	rate := getRateLimiterMiddleware(WithWindowsSize(timeGap), WithSubWindowsNumber(100000), WithMaxPassingPerWindows(1024))
+	timeGap := time.Microsecond * 10000
+	rate := getRateLimiterMiddleware(WithWindowsSize(timeGap), WithSubWindowsNumber(10000), WithMaxPassingPerWindows(1024))
 	var totalResult int64
 	go func() {
-		tick := time.After(timeGap)
+		tick := time.Tick(timeGap)
 		for {
 			select {
 			case <-tick:
@@ -26,7 +26,7 @@ func BenchmarkTryAcquire(b *testing.B) {
 					fmt.Println(totalResult)
 				}
 				atomic.SwapInt64(&totalResult, 0)
-				tick = time.After(timeGap)
+				//tick = time.After(timeGap)
 			}
 		}
 	}()

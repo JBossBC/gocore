@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -72,7 +73,8 @@ func TestGolangUtilMarshal(t *testing.T) {
 				return
 			}
 			if !json.Valid(bytes) {
-				fmt.Println(err.Error())
+				fmt.Println("analy error")
+				os.Exit(1)
 			}
 		}()
 	}
