@@ -31,6 +31,9 @@ const defaultMallocCap int64 = 1024
 const MaxConcurrentNumber = 8e4
 const MaxWorkNumber = MaxConcurrentNumber / MaxQueryBlockSize
 const EmergencyRecovery = 100
+const SmoothRecoverRatio = 0.25
+
+var DefaultSmoothRecoverTimes = time.Millisecond * 500
 
 func GetCurrentBlockNumber() (uint64, error) {
 	return GetClient().BlockNumber(context.Background())
@@ -73,6 +76,8 @@ func newGlobalInfo(timeout time.Duration, from int64, to int64, address []common
 	if chanNumber > MaxWorkNumber {
 		chanNumber = MaxWorkNumber
 	}
+	g.workMutex = sync.Mutex{}
+	g.controlPanel = controlPanel{cond: sync.NewCond(&g.workMutex), recoverSignal: make(chan int32, 1)}
 	g.workChan = make(chan int8, chanNumber)
 	var i int64
 	for ; i < chanNumber; i++ {
@@ -83,21 +88,23 @@ func newGlobalInfo(timeout time.Duration, from int64, to int64, address []common
 }
 
 type globalInfo struct {
-	address    []common.Address
-	topics     [][]common.Hash
-	currentId  int32
-	queue      []*logsWork
-	workNumber int32
-	timeout    time.Duration
-	offset     int64
-	end        int64
-	group      sync.WaitGroup
-	state      workState //state 0 is cantWork 1 is success 2 is failed 3 is timeout
-	mutex      sync.Mutex
-	err        error
-	errTrigger sync.Once
-	workChan   chan int8
-	//retryTimes int32
+	address      []common.Address
+	topics       [][]common.Hash
+	currentId    int32
+	queue        []*logsWork
+	workNumber   int32
+	timeout      time.Duration
+	offset       int64
+	end          int64
+	group        sync.WaitGroup
+	state        workState  //state 0 is cantWork 1 is success 2 is failed 3 is timeout
+	mutex        sync.Mutex //err mutex
+	err          error
+	errTrigger   sync.Once
+	workMutex    sync.Mutex
+	workChan     chan int8
+	retryTimes   int32
+	controlPanel controlPanel
 	//smooth     int32
 }
 type logsWork struct {
@@ -129,9 +136,34 @@ func newLogsWork(global *globalInfo) (result *logsWork) {
 	return result
 }
 
-/**
-后期做平滑过度，目前有点过于消耗CPU资源
-*/
+type controlPanel struct {
+	cond          *sync.Cond
+	state         int32 //state 0: 正常 state 1: 熔断,平滑过度
+	failedTimes   int32
+	sumTimes      int32
+	recoverSignal chan int32
+}
+
+func (cp *controlPanel) smoothRecover() {
+	time.Sleep(DefaultSmoothRecoverTimes)
+	var timeGap = time.NewTicker(DefaultSmoothRecoverTimes)
+	for {
+		select {
+		case <-timeGap.C:
+			cp.cond.Signal()
+		case <-cp.recoverSignal:
+			cp.cond.Broadcast()
+			timeGap.Stop()
+			return
+		}
+	}
+}
+func (cp *controlPanel) recover() {
+	atomic.CompareAndSwapInt32(&cp.state, 1, 0)
+	cp.sumTimes = 0
+	cp.failedTimes = 0
+	cp.recoverSignal <- 1
+}
 
 func (work *logsWork) handler() {
 	go func() {
@@ -150,13 +182,34 @@ func (work *logsWork) handler() {
 			select {
 			case <-work.done:
 			retryGet:
+				work.shareInfo.workMutex.Lock()
+				//平滑过度
+				if atomic.LoadInt32(&work.shareInfo.controlPanel.state) != 0 {
+					work.shareInfo.controlPanel.cond.Wait()
+				}
+				work.shareInfo.workMutex.Unlock()
+				if atomic.LoadInt32(&work.shareInfo.controlPanel.state) == 1 {
+					atomic.AddInt32(&work.shareInfo.controlPanel.sumTimes, 1)
+					if atomic.LoadInt32(&work.shareInfo.controlPanel.sumTimes) == 0 || float64(work.shareInfo.controlPanel.failedTimes/work.shareInfo.controlPanel.sumTimes) < SmoothRecoverRatio {
+						work.shareInfo.controlPanel.recover()
+					}
+				}
 				logs, err := GetClient().FilterLogs(context.Background(), work.filter)
 				if err != nil {
-					//if work.shareInfo.retryTimes > EmergencyRecovery {
-					//	work.shareInfo.retryTimes = 0
-					//}
+					if work.shareInfo.retryTimes >= EmergencyRecovery {
+						if atomic.CompareAndSwapInt32(&work.shareInfo.controlPanel.state, 0, 1) {
+							fmt.Println(work.shareInfo.retryTimes)
+							work.shareInfo.retryTimes = 0
+							work.shareInfo.controlPanel.smoothRecover()
+						}
+					}
 					if strings.Contains(err.Error(), "429 Too Many Requests") {
-						//work.shareInfo.retryTimes++
+						if atomic.LoadInt32(&work.shareInfo.controlPanel.state) == 0 {
+							atomic.AddInt32(&work.shareInfo.retryTimes, 1)
+							time.Sleep(DefaultSmoothRecoverTimes)
+						} else if atomic.LoadInt32(&work.shareInfo.controlPanel.state) == 1 {
+							atomic.AddInt32(&work.shareInfo.controlPanel.failedTimes, 1)
+						}
 						goto retryGet
 					}
 					//atomic.SwapInt32((*int32)(&work.state), 2)
