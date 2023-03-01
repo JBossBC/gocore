@@ -155,6 +155,7 @@ func (cp *controlPanel) smoothRecover() {
 			cp.cond.Broadcast()
 			timeGap.Stop()
 			return
+		default:
 		}
 	}
 }
