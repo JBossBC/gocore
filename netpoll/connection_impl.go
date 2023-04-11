@@ -295,7 +295,7 @@ func(c *connection)triggerRead(){
 
 	}
 }
-func(c *connection)triggerWrite(err error){
+func(c *connection) triggerWrite(err error){
 	select{
 	case c.writeTrigger<-err:
 	default:
@@ -365,7 +365,7 @@ func(c *connection)fill(need int)(err error){
 	for{
 		bs =c.inputs(c.inputBarrier.bs)
 		TryRead:
-			n,err=ioread(c.fd,bs,c.inputBarrier.ivs)
+			n,err=ioread(c.fd,bs ,c.inputBarrier.ivs)
 			if err!=nil{
 				break
 			}

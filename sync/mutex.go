@@ -119,7 +119,7 @@ func (m *Mutex) lockSlow() {
 			if old&(mutexLocked|mutexStarving) == 0 {
 				break
 			}
-			//下面是饥饿状态的基于信号量的取锁
+			//下面是饥饿状态的基于信号量的拿锁,等待状态越长放在前面
 			queueLifo := waitStartTime != 0
 			if waitStartTime == 0 {
 				waitStartTime = runtime_nanotime()
@@ -151,6 +151,14 @@ func (m *Mutex) lockSlow() {
 			old = m.state
 		}
 	}
+	//race 包是 Golang 中的一个内置包，用于数据竞争检测。当多个 Goroutine 同时访问同一片内存区域，且其中至少有一个 Goroutine 会对该内存区域进行写入操作时，就会产生数据竞争。这种情况下，无法保证程序的正常行为，并且可能会产生意料之外的结果或者崩溃。
+	//
+	//race 包提供了一组函数，可以在代码中手动标识共享内存区域的读取和写入操作，从而帮助用户找出并修复潜在的数据竞争问题。其主要方法有：
+	//
+	//Acquire 和 Release：用于标注对互斥锁、读写锁等锁类型的获取和释放操作。
+	//Read 和 Write：用于标注共享内存区域的读取和写入操作。
+	//Begin 和 End：用于标注一个临界区的开始和结束，临界区内的所有共享内存操作都需要被标记。
+	//需要注意的是，使用 race 包进行代码验证可能会对程序性能产生一定的影响，并且在开启了 -race 编译选项后，编译器会插入额外的代码来捕获并检测竞争条件，因此编译后的二进制文件可能会变得更大。
 	if race.Enabled {
 		reace.Acquire(unsafe.Pointer(m))
 	}
@@ -185,7 +193,6 @@ func (m *Mutex) unlockSlow(new int32) {
 				return
 			}
 			old = m.state
-
 		}
 	} else {
 		runtime_Semrelease(&m.sema, true, 1)
